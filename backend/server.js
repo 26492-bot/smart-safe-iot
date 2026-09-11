@@ -1,0 +1,410 @@
+/**
+ * IoT Smart Safe - Main Express & WebSocket Server
+ */
+
+const express = require('express');
+const http = require('http');
+const path = require('path');
+const cors = require('cors');
+const { WebSocketServer, WebSocket } = require('ws');
+require('dotenv').config();
+
+const db = require('./db');
+
+// Initialize database
+db.initDb();
+
+const app = express();
+const server = http.createServer(app);
+
+const PORT = process.env.PORT || 3000;
+const DEVICE_SECRET = process.env.DEVICE_SECRET || 'smart_safe_secret_key_2026';
+
+// Middleware
+app.use(cors());
+app.use(express.json());
+app.use(express.static(path.join(__dirname, '../public')));
+
+// Set up WebSocket server
+const wss = new WebSocketServer({ server, path: '/ws' });
+
+// Track connected clients
+const browserClients = new Set();
+const deviceClients = new Set();
+
+/**
+ * Broadcast an event to all connected web browser dashboards
+ */
+function broadcastToBrowsers(messageObj) {
+  const payload = JSON.stringify(messageObj);
+  for (const client of browserClients) {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(payload);
+    }
+  }
+}
+
+/**
+ * Broadcast a command to connected ESP32 device(s)
+ */
+function sendCommandToDevice(commandObj) {
+  const payload = JSON.stringify(commandObj);
+  let delivered = false;
+  for (const device of deviceClients) {
+    if (device.readyState === WebSocket.OPEN) {
+      device.send(payload);
+      delivered = true;
+    }
+  }
+  return delivered;
+}
+
+/**
+ * Broadcast updated stats and latest activity to all dashboards
+ */
+function broadcastStatsUpdate() {
+  const stats = db.getStats();
+  broadcastToBrowsers({
+    type: 'STATS_UPDATE',
+    payload: {
+      ...stats,
+      isDeviceOnline: deviceClients.size > 0
+    }
+  });
+}
+
+// WebSocket Connection Handling
+wss.on('connection', (ws, req) => {
+  const urlParams = new URLSearchParams(req.url.replace(/^.*\?/, ''));
+  const roleParam = urlParams.get('role');
+  const secretParam = urlParams.get('secret');
+
+  let clientRole = 'browser';
+
+  if (roleParam === 'device') {
+    clientRole = 'device';
+    deviceClients.add(ws);
+    console.log(`[WS] ESP32 Device connected (${req.socket.remoteAddress}). Total devices: ${deviceClients.size}`);
+    
+    // Broadcast device status to web clients
+    broadcastToBrowsers({
+      type: 'DEVICE_STATUS',
+      payload: { isDeviceOnline: true, deviceCount: deviceClients.size }
+    });
+  } else {
+    browserClients.add(ws);
+    console.log(`[WS] Web Browser connected. Total browsers: ${browserClients.size}`);
+
+    // Immediately send current stats and device status to new browser
+    const stats = db.getStats();
+    ws.send(JSON.stringify({
+      type: 'INIT_STATE',
+      payload: {
+        ...stats,
+        isDeviceOnline: deviceClients.size > 0,
+        logs: db.getLogs(50)
+      }
+    }));
+  }
+
+  // Handle incoming messages
+  ws.on('message', (data) => {
+    try {
+      const msg = JSON.parse(data.toString());
+
+      // Device identification from payload
+      if (msg.type === 'IDENTIFY') {
+        if (msg.role === 'device') {
+          browserClients.delete(ws);
+          deviceClients.add(ws);
+          clientRole = 'device';
+          console.log('[WS] Client identified as ESP32 Device');
+          broadcastToBrowsers({
+            type: 'DEVICE_STATUS',
+            payload: { isDeviceOnline: true, deviceCount: deviceClients.size }
+          });
+        }
+        return;
+      }
+
+      // Heartbeat ping
+      if (msg.type === 'PING') {
+        ws.send(JSON.stringify({ type: 'PONG', timestamp: new Date().toISOString() }));
+        return;
+      }
+
+      // Hardware Device Event: Keypad success/failed reported from ESP32
+      if (msg.type === 'EVENT' || msg.source === 'KEYPAD') {
+        const source = msg.source || 'KEYPAD';
+        const status = msg.status || 'SUCCESS';
+        const details = msg.details || (status === 'SUCCESS' ? 'เปิดสำเร็จจาก Keypad' : 'รหัสผิดจาก Keypad');
+
+        console.log(`[EVENT] Received from ${source}: ${status} - ${details}`);
+        db.addLog(source, status, details);
+
+        // Notify browsers of new log entry and updated counters
+        broadcastToBrowsers({
+          type: 'NEW_LOG',
+          payload: {
+            source,
+            status,
+            details,
+            created_at: new Date().toISOString()
+          }
+        });
+        broadcastStatsUpdate();
+      }
+
+      // Acknowledgment of password change from ESP32
+      if (msg.type === 'PASSWORD_ACK') {
+        console.log('[WS] ESP32 confirmed password update in Flash memory:', msg.status);
+        broadcastToBrowsers({
+          type: 'TOAST',
+          payload: {
+            title: 'ESP32 Synced',
+            message: 'ตู้เซฟอัปเดตรหัสผ่านใหม่ลง Flash สำเร็จแล้ว',
+            variant: 'success'
+          }
+        });
+      }
+    } catch (e) {
+      console.error('[WS] Error processing message:', e.message);
+    }
+  });
+
+  // Client disconnect
+  ws.on('close', () => {
+    if (clientRole === 'device') {
+      deviceClients.delete(ws);
+      console.log(`[WS] ESP32 Device disconnected. Remaining devices: ${deviceClients.size}`);
+      broadcastToBrowsers({
+        type: 'DEVICE_STATUS',
+        payload: { isDeviceOnline: deviceClients.size > 0, deviceCount: deviceClients.size }
+      });
+    } else {
+      browserClients.delete(ws);
+      console.log(`[WS] Browser disconnected. Remaining browsers: ${browserClients.size}`);
+    }
+  });
+
+  ws.on('error', (err) => {
+    console.error('[WS] Connection error:', err.message);
+  });
+});
+
+// Periodic Ping to prevent Cloud proxies (Render, Cloudflare, etc.) from closing idle connections
+setInterval(() => {
+  wss.clients.forEach((ws) => {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.ping();
+    }
+  });
+}, 25000);
+
+// ==========================================
+// REST API ROUTES
+// ==========================================
+
+// Health Check
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString(),
+    isDeviceOnline: deviceClients.size > 0,
+    connectedDevices: deviceClients.size,
+    connectedBrowsers: browserClients.size
+  });
+});
+
+// Get Dashboard Stats
+app.get('/api/safe/stats', (req, res) => {
+  try {
+    const stats = db.getStats();
+    res.json({
+      success: true,
+      ...stats,
+      isDeviceOnline: deviceClients.size > 0
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Get Historical Logs
+app.get('/api/safe/logs', (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit) || 100, 200);
+    const logs = db.getLogs(limit);
+    res.json({ success: true, logs });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Remote Unlock from Website
+app.post('/api/safe/unlock', (req, res) => {
+  try {
+    console.log('[API] Remote unlock command received from Web Dashboard');
+
+    // Send command to connected ESP32 device(s)
+    const isDeviceDelivered = sendCommandToDevice({
+      type: 'COMMAND',
+      action: 'UNLOCK',
+      timestamp: new Date().toISOString()
+    });
+
+    // Record audit log
+    const logDetails = isDeviceDelivered
+      ? 'สั่งเปิดจากเว็บไซต์ (ส่งคำสั่งถึง ESP32 สำเร็จ)'
+      : 'สั่งเปิดจากเว็บไซต์ (ESP32 ออฟไลน์ - จำลองการปลดล็อก)';
+    
+    db.addLog('WEBSITE', 'SUCCESS', logDetails);
+
+    // Broadcast to web dashboards
+    broadcastToBrowsers({
+      type: 'NEW_LOG',
+      payload: {
+        source: 'WEBSITE',
+        status: 'SUCCESS',
+        details: logDetails,
+        created_at: new Date().toISOString()
+      }
+    });
+    broadcastStatsUpdate();
+
+    res.json({
+      success: true,
+      message: isDeviceDelivered ? 'ส่งคำสั่งเปิดตู้เซฟไปยัง ESP32 สำเร็จ' : 'ส่งคำสั่งแล้ว (ESP32 ออฟไลน์)',
+      isDeviceOnline: isDeviceDelivered
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Change Safe Password from Website
+app.post('/api/safe/change-password', (req, res) => {
+  try {
+    const { currentPassword, newPassword, confirmPassword } = req.body;
+
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      return res.status(400).json({
+        success: false,
+        message: 'กรุณากรอกข้อมูลให้ครบทุกช่อง'
+      });
+    }
+
+    if (newPassword !== confirmPassword) {
+      return res.status(400).json({
+        success: false,
+        message: 'รหัสผ่านใหม่และการยืนยันรหัสผ่านไม่ตรงกัน'
+      });
+    }
+
+    if (!/^\d{4}$/.test(newPassword)) {
+      return res.status(400).json({
+        success: false,
+        message: 'รหัสผ่านต้องเป็นตัวเลข 4 หลักเท่านั้น (เช่น 1234)'
+      });
+    }
+
+    // Verify current password against database
+    const isCurrentValid = db.checkPassword(currentPassword);
+    if (!isCurrentValid) {
+      return res.status(400).json({
+        success: false,
+        message: 'รหัสผ่านปัจจุบันไม่ถูกต้อง'
+      });
+    }
+
+    // Update password in database
+    db.updateSafePassword(newPassword);
+    console.log('[API] Safe password updated successfully in DB');
+
+    // Push new password command to ESP32 device
+    const isDeviceDelivered = sendCommandToDevice({
+      type: 'COMMAND',
+      action: 'SET_PASSWORD',
+      payload: {
+        newPassword
+      }
+    });
+
+    // Notify connected browsers (Never expose actual password in broadcast)
+    broadcastToBrowsers({
+      type: 'TOAST',
+      payload: {
+        title: 'รหัสผ่านเปลี่ยนสำเร็จ',
+        message: 'เปลี่ยนรหัสผ่านตู้เซฟเรียบร้อยแล้ว สามารถใช้รหัสใหม่ที่ Keypad ได้ทันที',
+        variant: 'success'
+      }
+    });
+
+    res.json({
+      success: true,
+      message: 'เปลี่ยนรหัสผ่านสำเร็จเรียบร้อยแล้ว',
+      isDeviceOnline: isDeviceDelivered
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Device Event Ingestion via HTTP REST (Fallback if WebSocket drops)
+app.post('/api/device/event', (req, res) => {
+  try {
+    const { source, status, details } = req.body;
+    const cleanSource = source === 'WEBSITE' ? 'WEBSITE' : 'KEYPAD';
+    const cleanStatus = status === 'SUCCESS' ? 'SUCCESS' : 'FAILED';
+    const cleanDetails = details || (cleanStatus === 'SUCCESS' ? 'เปิดสำเร็จ' : 'รหัสไม่ถูกต้อง');
+
+    db.addLog(cleanSource, cleanStatus, cleanDetails);
+
+    broadcastToBrowsers({
+      type: 'NEW_LOG',
+      payload: {
+        source: cleanSource,
+        status: cleanStatus,
+        details: cleanDetails,
+        created_at: new Date().toISOString()
+      }
+    });
+    broadcastStatsUpdate();
+
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Device Sync Endpoint: ESP32 retrieves the active PIN on initial boot
+app.get('/api/device/sync-pin', (req, res) => {
+  try {
+    const pin = db.getDevicePin();
+    res.json({
+      success: true,
+      pin,
+      timestamp: new Date().toISOString()
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Fallback to index.html for Single Page App
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/index.html'));
+});
+
+// Start Server - bind to 0.0.0.0 for cloud hosting (Render, Railway, etc.)
+const HOST = '0.0.0.0';
+server.listen(PORT, HOST, () => {
+  console.log(`====================================================`);
+  console.log(`  🛡️  SMART SAFE IoT SERVER RUNNING`);
+  console.log(`  🌐  Web Dashboard:  http://localhost:${PORT}`);
+  console.log(`  ⚡  WebSocket URL:   ws://localhost:${PORT}/ws`);
+  console.log(`  🔌  Device Connect: ws://localhost:${PORT}/ws?role=device`);
+  console.log(`  ☁️  Host Binding:    ${HOST}:${PORT}`);
+  console.log(`====================================================`);
+});

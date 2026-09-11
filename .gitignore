@@ -1,0 +1,21 @@
+# Dependencies
+node_modules/
+
+# Database (will be recreated on first run)
+backend/smart_safe.db
+backend/smart_safe_fallback.json
+
+# Environment variables (keep secret!)
+backend/.env
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+
+# Firmware build artifacts
+firmware/smart_safe_iot/build/

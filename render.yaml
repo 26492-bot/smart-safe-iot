@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: smart-safe-iot
+    runtime: node
+    plan: free
+    buildCommand: npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: DEVICE_SECRET
+        generateValue: true

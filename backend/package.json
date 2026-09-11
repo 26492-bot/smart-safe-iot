@@ -1,0 +1,27 @@
+{
+  "name": "smart-safe-iot-backend",
+  "version": "1.0.0",
+  "description": "IoT Smart Safe Backend & Web Dashboard Server",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "test": "node ../test/integration_test.js",
+    "mock-device": "node ../test/mock_device.js"
+  },
+  "keywords": [
+    "esp32",
+    "iot",
+    "smart-safe",
+    "kidbright32",
+    "websocket"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "ws": "^8.18.0"
+  }
+}

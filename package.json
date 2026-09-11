@@ -1,0 +1,15 @@
+{
+  "name": "smart-safe-iot",
+  "version": "1.0.0",
+  "description": "IoT Smart Safe - ระบบตู้เซฟอัจฉริยะ Real-time Dashboard",
+  "scripts": {
+    "install:backend": "cd backend && npm install",
+    "start": "cd backend && node server.js",
+    "build": "npm run install:backend",
+    "dev": "cd backend && node --watch server.js"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "license": "MIT"
+}

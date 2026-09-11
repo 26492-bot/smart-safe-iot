@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Smart Safe IoT - ระบบตู้เซฟอัจฉริยะออนไลน์</title>
+  <meta name="description" content="ระบบควบคุมและติดตามตู้เซฟอัจฉริยะ (IoT Smart Safe) แบบ Real-time รองรับการสั่งเปิดตู้ เปลี่ยนรหัสผ่าน และบันทึกประวัติการใช้งาน">
+  
+  <!-- Google Fonts: Outfit & JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Outfit:wght@300;400;500;600;700;800&family=Noto+Sans+Thai:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  
+  <!-- Custom Stylesheet -->
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <!-- Ambient background glow effects -->
+  <div class="glow-bg glow-cyan"></div>
+  <div class="glow-bg glow-purple"></div>
+
+  <!-- Toast Notification Container -->
+  <div id="toastContainer" class="toast-container" aria-live="polite"></div>
+
+  <div class="app-container">
+    <!-- Top Navigation / Header -->
+    <header class="app-header">
+      <div class="header-brand">
+        <div class="brand-icon">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <h1 class="brand-title">SMART SAFE <span class="badge-iot">IoT</span></h1>
+          <p class="brand-subtitle">ระบบตู้เซฟอัจฉริยะ &amp; ศูนย์ควบคุมความปลอดภัย</p>
+        </div>
+      </div>
+
+      <div class="header-status">
+        <!-- Live Clock -->
+        <div class="time-widget" id="liveClockWidget">
+          <span class="clock-label">ระบบเวลา</span>
+          <span class="clock-value" id="liveClockText">--:--:--</span>
+        </div>
+
+        <!-- ESP32 Device Online Status Indicator -->
+        <div class="device-status-badge offline" id="deviceStatusBadge" title="สถานะการเชื่อมต่อบอร์ด KidBright32 / ESP32">
+          <span class="status-pulse"></span>
+          <span class="status-text" id="deviceStatusText">ESP32 OFFLINE</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Content Dashboard -->
+    <main class="dashboard-grid">
+      <!-- 1. Stats Counter Cards Row -->
+      <section class="stats-overview" aria-label="สถิติการใช้งาน">
+        <!-- SUCCESS Card -->
+        <div class="stat-card stat-success">
+          <div class="stat-header">
+            <span class="stat-title">เปิดสำเร็จ (SUCCESS)</span>
+            <div class="stat-icon-wrap icon-success">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="20 6 9 17 4 12"></polyline>
+              </svg>
+            </div>
+          </div>
+          <div class="stat-body">
+            <div class="stat-number" id="statSuccessCount">0</div>
+            <span class="stat-unit">ครั้ง</span>
+          </div>
+          <div class="stat-footer">
+            <span class="trend-indicator up">● สำเร็จผ่าน Keypad &amp; Web</span>
+          </div>
+        </div>
+
+        <!-- FAILED Card -->
+        <div class="stat-card stat-failed">
+          <div class="stat-header">
+            <span class="stat-title">รหัสผิด / ล้มเหลว (FAILED)</span>
+            <div class="stat-icon-wrap icon-failed">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </div>
+          </div>
+          <div class="stat-body">
+            <div class="stat-number" id="statFailedCount">0</div>
+            <span class="stat-unit">ครั้ง</span>
+          </div>
+          <div class="stat-footer">
+            <span class="trend-indicator down">● แจ้งเตือน Buzzer + ไฟกระพริบ</span>
+          </div>
+        </div>
+
+        <!-- LAST ACTIVITY Card -->
+        <div class="stat-card stat-activity">
+          <div class="stat-header">
+            <span class="stat-title">ใช้งานล่าสุด (LAST ACTIVITY)</span>
+            <div class="stat-icon-wrap icon-activity">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"></circle>
+                <polyline points="12 6 12 12 16 14"></polyline>
+              </svg>
+            </div>
+          </div>
+          <div class="stat-body">
+            <div class="activity-time" id="lastActivityTime">ยังไม่มีประวัติ</div>
+            <div class="activity-source" id="lastActivityBadge">-</div>
+          </div>
+          <div class="stat-footer">
+            <span class="stat-subtext" id="lastActivityDetails">รอการทำงาน...</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- 2. Controls Section & Safe Graphic -->
+      <section class="controls-container">
+        <!-- Safe Interactive Visualizer Card -->
+        <article class="glass-panel safe-visualizer-card">
+          <div class="panel-header">
+            <h2 class="panel-title">
+              <span class="panel-dot"></span>
+              สถานะตู้เซฟปัจจุบัน
+            </h2>
+            <span class="safe-state-tag locked" id="safeStateTag">LOCKED</span>
+          </div>
+
+          <div class="safe-door-container">
+            <div class="safe-door-frame" id="safeDoorFrame">
+              <div class="safe-dial" id="safeDial">
+                <div class="dial-marks"></div>
+                <div class="dial-center">
+                  <div class="dial-lock-icon" id="dialLockIcon">
+                    <!-- Locked SVG -->
+                    <svg class="svg-locked" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                      <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                    </svg>
+                    <!-- Unlocked SVG -->
+                    <svg class="svg-unlocked" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                      <path d="M7 11V7a5 5 0 0 1 9.9-1"></path>
+                    </svg>
+                  </div>
+                </div>
+              </div>
+              <div class="safe-bolts top"></div>
+              <div class="safe-bolts right"></div>
+              <div class="safe-bolts bottom"></div>
+              <div class="safe-bolts left"></div>
+            </div>
+            
+            <div class="safe-status-desc">
+              <p id="safeStatusMessage">ระบบล็อกอยู่ - พร้อมรับคำสั่งจากเว็บหรือ Keypad</p>
+            </div>
+          </div>
+
+          <!-- The Big Action Button: OPEN SAFE -->
+          <div class="action-button-wrapper">
+            <button type="button" class="btn-open-safe" id="btnOpenSafe">
+              <span class="btn-glow-layer"></span>
+              <span class="btn-content">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"></path>
+                </svg>
+                <span>OPEN SAFE</span>
+              </span>
+            </button>
+            <p class="btn-hint">คลิกเพื่อสั่งปลดล็อกตู้เซฟผ่านระบบอินเทอร์เน็ตทันที</p>
+          </div>
+        </article>
+
+        <!-- Change Password Card -->
+        <article class="glass-panel password-card">
+          <div class="panel-header">
+            <h2 class="panel-title">
+              <span class="panel-dot"></span>
+              เปลี่ยนรหัสผ่าน (Change Password)
+            </h2>
+            <span class="security-badge">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+              </svg>
+              Encrypted
+            </span>
+          </div>
+
+          <form id="changePasswordForm" class="password-form" autocomplete="off">
+            <!-- Current Password -->
+            <div class="form-group">
+              <label for="currentPasswordInput" class="form-label">Current Password (รหัสเดิม 4 หลัก)</label>
+              <div class="input-with-icon">
+                <input type="password" id="currentPasswordInput" name="currentPassword" maxlength="4" pattern="[0-9]{4}" placeholder="••••" required inputmode="numeric">
+                <button type="button" class="btn-toggle-pwd" data-target="currentPasswordInput" aria-label="เปิด/ปิดแสดงรหัสผ่าน">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                </button>
+              </div>
+            </div>
+
+            <!-- New Password -->
+            <div class="form-group">
+              <label for="newPasswordInput" class="form-label">New Password (รหัสใหม่ 4 หลัก)</label>
+              <div class="input-with-icon">
+                <input type="password" id="newPasswordInput" name="newPassword" maxlength="4" pattern="[0-9]{4}" placeholder="••••" required inputmode="numeric">
+                <button type="button" class="btn-toggle-pwd" data-target="newPasswordInput" aria-label="เปิด/ปิดแสดงรหัสผ่าน">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                </button>
+              </div>
+            </div>
+
+            <!-- Confirm New Password -->
+            <div class="form-group">
+              <label for="confirmPasswordInput" class="form-label">Confirm New Password (ยืนยันรหัสใหม่)</label>
+              <div class="input-with-icon">
+                <input type="password" id="confirmPasswordInput" name="confirmPassword" maxlength="4" pattern="[0-9]{4}" placeholder="••••" required inputmode="numeric">
+                <button type="button" class="btn-toggle-pwd" data-target="confirmPasswordInput" aria-label="เปิด/ปิดแสดงรหัสผ่าน">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                </button>
+              </div>
+            </div>
+
+            <button type="submit" class="btn-submit-pwd" id="btnSubmitPassword">
+              <span class="btn-loading-spinner hidden" id="pwdSpinner"></span>
+              <span id="pwdBtnText">บันทึกรหัสผ่านใหม่</span>
+            </button>
+
+            <p class="form-security-note">
+              * รหัสผ่านใหม่จะถูกบันทึกลง Flash Memory ของ ESP32 ทันที และรหัสเดิมจะไม่สามารถเปิดตู้ได้อีก
+            </p>
+          </form>
+        </article>
+      </section>
+
+      <!-- 3. Logs & Audit History Section -->
+      <section class="glass-panel logs-panel" aria-label="ตารางข้อมูลย้อนหลัง">
+        <div class="panel-header logs-header">
+          <div class="logs-title-wrap">
+            <h2 class="panel-title">
+              <span class="panel-dot"></span>
+              ตารางข้อมูลย้อนหลัง (Activity History)
+            </h2>
+            <span class="realtime-badge">
+              <span class="pulse-dot"></span> LIVE SYNC
+            </span>
+          </div>
+
+          <!-- Filter Buttons -->
+          <div class="filter-group">
+            <button type="button" class="filter-btn active" data-filter="ALL">ทั้งหมด</button>
+            <button type="button" class="filter-btn" data-filter="KEYPAD">Keypad</button>
+            <button type="button" class="filter-btn" data-filter="WEBSITE">Website</button>
+            <button type="button" class="filter-btn" data-filter="SUCCESS">สำเร็จ</button>
+            <button type="button" class="filter-btn" data-filter="FAILED">รหัสผิด</button>
+          </div>
+        </div>
+
+        <div class="table-responsive">
+          <table class="logs-table" id="logsTable">
+            <thead>
+              <tr>
+                <th scope="col" style="width: 25%;">วันเวลา</th>
+                <th scope="col" style="width: 25%;">ประเภทการใช้งาน</th>
+                <th scope="col" style="width: 20%;">ผลลัพธ์</th>
+                <th scope="col" style="width: 30%;">รายละเอียด</th>
+              </tr>
+            </thead>
+            <tbody id="logsTableBody">
+              <!-- Logs Rows will be dynamically rendered here -->
+              <tr class="empty-row">
+                <td colspan="4" class="text-center">กำลังโหลดข้อมูลประวัติการใช้งาน...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <!-- App Footer -->
+    <footer class="app-footer">
+      <p>IoT Smart Safe Project &bull; Powered by KidBright32 / ESP32 &bull; Realtime Cloud Architecture</p>
+    </footer>
+  </div>
+
+  <!-- Client Application Script -->
+  <script src="js/app.js"></script>
+</body>
+</html>
