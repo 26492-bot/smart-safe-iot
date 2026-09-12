@@ -13,6 +13,8 @@
   
   <!-- Custom Stylesheet -->
   <link rel="stylesheet" href="css/style.css">
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 </head>
 <body>
   <!-- Ambient background glow effects -->
@@ -233,6 +235,43 @@
             </p>
           </form>
         </article>
+      </section>
+
+      <!-- CHARTS SECTION -->
+      <section class="charts-section" aria-label="กราฟสถิติ">
+
+        <!-- Donut Chart: Success vs Failed -->
+        <article class="glass-panel chart-card">
+          <div class="panel-header">
+            <h2 class="panel-title">
+              <span class="panel-dot"></span>
+              สัดส่วนการเปิดตู้
+            </h2>
+            <span class="chart-period-badge">ทั้งหมด</span>
+          </div>
+          <div class="chart-wrap chart-wrap-donut">
+            <canvas id="chartDonut" aria-label="กราฟวงกลมสถิติการเปิดตู้"></canvas>
+            <div class="donut-center-label" id="donutCenterLabel">
+              <span class="donut-total" id="donutTotal">0</span>
+              <span class="donut-sub">ครั้ง</span>
+            </div>
+          </div>
+        </article>
+
+        <!-- Bar Chart: Activity last 7 days -->
+        <article class="glass-panel chart-card chart-card-wide">
+          <div class="panel-header">
+            <h2 class="panel-title">
+              <span class="panel-dot"></span>
+              กิจกรรม 7 วันย้อนหลัง
+            </h2>
+            <span class="chart-period-badge">Daily</span>
+          </div>
+          <div class="chart-wrap">
+            <canvas id="chartDaily" aria-label="กราฟกิจกรรมรายวัน 7 วันย้อนหลัง"></canvas>
+          </div>
+        </article>
+
       </section>
 
       <!-- 3. Logs & Audit History Section -->

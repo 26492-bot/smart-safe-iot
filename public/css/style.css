@@ -575,6 +575,70 @@ body {
 }
 
 /* ==========================================================================
+   CHARTS SECTION
+   ========================================================================== */
+.charts-section {
+  display: grid;
+  grid-template-columns: 1fr 1.8fr;
+  gap: 1.5rem;
+  margin-bottom: 2rem;
+}
+
+.chart-card {
+  display: flex;
+  flex-direction: column;
+}
+
+.chart-period-badge {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.06);
+  padding: 0.2rem 0.6rem;
+  border-radius: var(--radius-full);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.chart-wrap {
+  position: relative;
+  width: 100%;
+  height: 250px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.chart-wrap-donut {
+  height: 230px;
+}
+
+.donut-center-label {
+  position: absolute;
+  top: 48%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.donut-total {
+  font-family: var(--font-mono);
+  font-size: 2rem;
+  font-weight: 800;
+  color: #ffffff;
+  line-height: 1;
+}
+
+.donut-sub {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+/* ==========================================================================
    PASSWORD FORM
    ========================================================================== */
 .security-badge {
@@ -958,6 +1022,10 @@ body {
   }
 
   .controls-container {
+    grid-template-columns: 1fr;
+  }
+
+  .charts-section {
     grid-template-columns: 1fr;
   }
 

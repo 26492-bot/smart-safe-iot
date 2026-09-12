@@ -289,6 +289,9 @@ function updateDashboardUI() {
 
   // Render Table
   renderLogsTable();
+
+  // Refresh Charts
+  loadChartData();
 }
 
 function updateDeviceBadgeUI() {
@@ -483,8 +486,158 @@ el.filterButtons.forEach((btn) => {
   });
 });
 
+// ==========================================
+// CHART.JS INTEGRATION
+// ==========================================
+let donutChart = null;
+let dailyChart = null;
+
+function initCharts() {
+  const ctxDonut = document.getElementById('chartDonut');
+  const ctxDaily = document.getElementById('chartDaily');
+
+  if (!ctxDonut || !ctxDaily || typeof Chart === 'undefined') {
+    console.warn('Chart.js or canvas element not found.');
+    return;
+  }
+
+  // Common dark theme options
+  Chart.defaults.font.family = "'Outfit', sans-serif";
+  Chart.defaults.color = '#94a3b8';
+
+  // Donut Chart
+  donutChart = new Chart(ctxDonut, {
+    type: 'doughnut',
+    data: {
+      labels: ['สำเร็จ', 'รหัสผิด'],
+      datasets: [{
+        data: [0, 0],
+        backgroundColor: ['#10b981', '#f43f5e'],
+        hoverBackgroundColor: ['#34d399', '#fb7185'],
+        borderWidth: 0,
+        borderRadius: 4
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      cutout: '72%',
+      plugins: {
+        legend: {
+          position: 'bottom',
+          labels: {
+            color: '#cbd5e1',
+            usePointStyle: true,
+            padding: 15,
+            font: { size: 12 }
+          }
+        },
+        tooltip: {
+          backgroundColor: '#0f172a',
+          titleColor: '#f8fafc',
+          bodyColor: '#cbd5e1',
+          borderColor: 'rgba(255,255,255,0.1)',
+          borderWidth: 1,
+          padding: 10
+        }
+      }
+    }
+  });
+
+  // Daily Bar Chart
+  dailyChart = new Chart(ctxDaily, {
+    type: 'bar',
+    data: {
+      labels: [],
+      datasets: [
+        {
+          label: 'เปิดสำเร็จ',
+          data: [],
+          backgroundColor: '#10b981',
+          borderRadius: 6,
+          maxBarThickness: 28
+        },
+        {
+          label: 'รหัสผิด',
+          data: [],
+          backgroundColor: '#f43f5e',
+          borderRadius: 6,
+          maxBarThickness: 28
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          position: 'top',
+          align: 'end',
+          labels: {
+            color: '#cbd5e1',
+            usePointStyle: true,
+            boxWidth: 8,
+            font: { size: 12 }
+          }
+        },
+        tooltip: {
+          backgroundColor: '#0f172a',
+          titleColor: '#f8fafc',
+          bodyColor: '#cbd5e1',
+          borderColor: 'rgba(255,255,255,0.1)',
+          borderWidth: 1,
+          padding: 10
+        }
+      },
+      scales: {
+        x: {
+          grid: { display: false },
+          ticks: { color: '#64748b', font: { size: 11 } }
+        },
+        y: {
+          beginAtZero: true,
+          grid: { color: 'rgba(255, 255, 255, 0.05)' },
+          ticks: { color: '#64748b', precision: 0, font: { size: 11 } }
+        }
+      }
+    }
+  });
+}
+
+async function loadChartData() {
+  try {
+    const res = await fetch('/api/safe/chart-data');
+    const data = await res.json();
+    if (data.success) {
+      // Donut
+      if (donutChart) {
+        donutChart.data.datasets[0].data = data.donut.values;
+        donutChart.update();
+      }
+      const total = (data.donut.values[0] || 0) + (data.donut.values[1] || 0);
+      const totalEl = document.getElementById('donutTotal');
+      if (totalEl) totalEl.textContent = total;
+
+      // Daily
+      if (dailyChart) {
+        const formattedLabels = data.daily.labels.map((l) => {
+          const parts = l.split('-');
+          return parts.length === 3 ? `${parts[2]}/${parts[1]}` : l;
+        });
+        dailyChart.data.labels = formattedLabels;
+        dailyChart.data.datasets[0].data = data.daily.success;
+        dailyChart.data.datasets[1].data = data.daily.failed;
+        dailyChart.update();
+      }
+    }
+  } catch (err) {
+    console.warn('Failed to load chart data:', err);
+  }
+}
+
 // Initialize on page load
 window.addEventListener('DOMContentLoaded', () => {
+  initCharts();
   connectWebSocket();
 
   // Initial REST fetch in case WebSocket takes a moment
@@ -512,4 +665,6 @@ window.addEventListener('DOMContentLoaded', () => {
       }
     })
     .catch((err) => console.warn('Init fetch logs error:', err));
+
+  loadChartData();
 });

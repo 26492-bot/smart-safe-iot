@@ -242,6 +242,72 @@ app.get('/api/safe/logs', (req, res) => {
   }
 });
 
+// Chart Data: Hourly activity for today + overall breakdown
+app.get('/api/safe/chart-data', (req, res) => {
+  try {
+    const logs = db.getLogs(200);
+    const now = new Date();
+    const todayStr = now.toISOString().slice(0, 10); // YYYY-MM-DD
+
+    // Hourly buckets for today (0-23)
+    const hourlySuccess = new Array(24).fill(0);
+    const hourlyFailed  = new Array(24).fill(0);
+
+    // Last 7 days daily buckets
+    const dailyMap = {};
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - i);
+      dailyMap[d.toISOString().slice(0, 10)] = { success: 0, failed: 0 };
+    }
+
+    logs.forEach(log => {
+      const d = new Date(log.created_at);
+      const dayKey = d.toISOString().slice(0, 10);
+      const hour   = d.getHours();
+      const isSuccess = log.status === 'SUCCESS';
+
+      // Hourly (today only)
+      if (dayKey === todayStr) {
+        if (isSuccess) hourlySuccess[hour]++;
+        else           hourlyFailed[hour]++;
+      }
+
+      // Daily (last 7 days)
+      if (dailyMap[dayKey] !== undefined) {
+        if (isSuccess) dailyMap[dayKey].success++;
+        else           dailyMap[dayKey].failed++;
+      }
+    });
+
+    const dailyLabels  = Object.keys(dailyMap);
+    const dailySuccess = dailyLabels.map(k => dailyMap[k].success);
+    const dailyFailed  = dailyLabels.map(k => dailyMap[k].failed);
+
+    const stats = db.getStats();
+
+    res.json({
+      success: true,
+      donut: {
+        labels: ['สำเร็จ', 'รหัสผิด'],
+        values: [stats.successCount, stats.failedCount]
+      },
+      hourly: {
+        labels: Array.from({ length: 24 }, (_, i) => `${String(i).padStart(2,'0')}:00`),
+        success: hourlySuccess,
+        failed: hourlyFailed
+      },
+      daily: {
+        labels: dailyLabels,
+        success: dailySuccess,
+        failed: dailyFailed
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Remote Unlock from Website
 app.post('/api/safe/unlock', (req, res) => {
   try {

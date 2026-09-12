@@ -73,6 +73,10 @@ unsigned long lastHeartbeatTime = 0;
 const unsigned long HEARTBEAT_INTERVAL = 20000; // 20 seconds
 
 // 4x4 Keypad Matrix Mapping
+// FIX: ย้าย ROW_PINS / COL_PINS มาไว้ใน .ino เพื่อป้องกัน multiple definition
+const byte ROW_PINS[KEYPAD_ROWS] = { 26, 27, 18, 19 };
+const byte COL_PINS[KEYPAD_COLS] = { 33, 23, 21, 22 };
+
 const char KEY_MAP[KEYPAD_ROWS][KEYPAD_COLS] = {
   { '1', '2', '3', 'A' },
   { '4', '5', '6', 'B' },
@@ -579,6 +583,7 @@ void setup() {
     syncPinWithCloud();
 
     // Configure WebSocket Client
+    // FIX: USE_SSL / SERVER_HOST / SERVER_PORT / WS_PATH เป็น #define แล้ว (ใช้ได้ปกติ)
     if (USE_SSL) {
       webSocket.beginSSL(SERVER_HOST, SERVER_PORT, WS_PATH);
     } else {
