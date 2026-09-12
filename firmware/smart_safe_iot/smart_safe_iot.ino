@@ -563,16 +563,21 @@ void setup() {
   initFlashStorage();
 
   // 5. Connect to WiFi
-  Serial.printf("[WIFI] Connecting to %s...\n", WIFI_SSID);
+  Serial.printf("[WIFI] Connecting to SSID: '%s'...\n", WIFI_SSID);
+  WiFi.persistent(false);
+  WiFi.disconnect(true);
+  delay(200);
   WiFi.mode(WIFI_STA);
-  WiFi.setTxPower(WIFI_POWER_15dBm); // ลดกำลังส่งเล็กน้อยเพื่อลดกระแสกระชาก
+  WiFi.setAutoReconnect(true);
+  WiFi.setTxPower(WIFI_POWER_15dBm);
   delay(100);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
   unsigned long wifiStart = millis();
-  while (WiFi.status() != WL_CONNECTED && (millis() - wifiStart < 15000)) {
+  while (WiFi.status() != WL_CONNECTED && (millis() - wifiStart < 20000)) {
     delay(500);
     Serial.print(".");
+    Serial.flush();
   }
 
   if (WiFi.status() == WL_CONNECTED) {
@@ -583,7 +588,6 @@ void setup() {
     syncPinWithCloud();
 
     // Configure WebSocket Client
-    // FIX: USE_SSL / SERVER_HOST / SERVER_PORT / WS_PATH เป็น #define แล้ว (ใช้ได้ปกติ)
     if (USE_SSL) {
       webSocket.beginSSL(SERVER_HOST, SERVER_PORT, WS_PATH);
     } else {
@@ -595,7 +599,25 @@ void setup() {
 
     Serial.printf("[WS] Connecting to ws%s://%s:%d%s\n", USE_SSL ? "s" : "", SERVER_HOST, SERVER_PORT, WS_PATH);
   } else {
-    Serial.println("\n[WIFI] Could not connect. Operating in OFFLINE SAFE mode.");
+    int st = WiFi.status();
+    Serial.printf("\n[WIFI] Connection Timeout (Status Code: %d)\n", st);
+    if (st == WL_NO_SSID_AVAIL) {
+      Serial.println("[WIFI DIAGNOSIS] ⚠️ ไม่พบ SSID 'V'! กรุณาเช็คว่าเปิด Hotspot 2.4GHz และอยู่ในระยะส่ง");
+    } else if (st == WL_CONNECT_FAILED) {
+      Serial.println("[WIFI DIAGNOSIS] ⚠️ รหัสผ่าน WiFi ไม่ถูกต้อง!");
+    } else {
+      Serial.println("[WIFI DIAGNOSIS] ⚠️ กำลังพยายามเชื่อมต่อต่อใน Background (Auto-Reconnect)...");
+    }
+    
+    // Always configure WebSocket so loop() can reconnect when WiFi connects
+    if (USE_SSL) {
+      webSocket.beginSSL(SERVER_HOST, SERVER_PORT, WS_PATH);
+    } else {
+      webSocket.begin(SERVER_HOST, SERVER_PORT, WS_PATH);
+    }
+    webSocket.onEvent(webSocketEvent);
+    webSocket.setReconnectInterval(5000);
+    webSocket.enableHeartbeat(15000, 3000, 2);
   }
 }
 
