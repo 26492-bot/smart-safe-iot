@@ -155,6 +155,19 @@ wss.on('connection', (ws, req) => {
         broadcastStatsUpdate();
       }
 
+      // Live Keypad Input: Relay digit/clear/confirm events to browser dashboards
+      if (msg.type === 'KEYPRESS') {
+        broadcastToBrowsers({
+          type: 'KEYPRESS',
+          payload: {
+            action: msg.action,
+            count: msg.count || 0,
+            key: msg.key || '',
+            pin: msg.pin || ''
+          }
+        });
+      }
+
       // Acknowledgment of password change from ESP32
       if (msg.type === 'PASSWORD_ACK') {
         console.log('[WS] ESP32 confirmed password update in Flash memory:', msg.status);

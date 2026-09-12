@@ -492,6 +492,10 @@ void handleKeypadInput() {
     enteredIndex = 0;
     memset(enteredPin, 0, sizeof(enteredPin));
     Serial.println("[KEYPAD] Input cleared (*)");
+    // Notify web dashboard: input cleared
+    if (isWsConnected) {
+      webSocket.sendTXT("{\"type\":\"KEYPRESS\",\"action\":\"CLEAR\",\"count\":0,\"pin\":\"\"}");
+    }
     return;
   }
 
@@ -503,7 +507,11 @@ void handleKeypadInput() {
     }
 
     enteredPin[enteredIndex] = '\0';
-    Serial.println("[KEYPAD] Submitted PIN: ****");
+    Serial.println("[KEYPAD] Submitted PIN");
+    
+    if (isWsConnected) {
+      webSocket.sendTXT("{\"type\":\"KEYPRESS\",\"action\":\"CONFIRM\",\"count\":0,\"pin\":\"\"}");
+    }
 
     // Verify entered PIN against active PIN
     if (String(enteredPin) == activePin) {
@@ -527,7 +535,13 @@ void handleKeypadInput() {
     if (enteredIndex < PIN_LENGTH) {
       enteredPin[enteredIndex++] = key;
       enteredPin[enteredIndex] = '\0';
-      Serial.printf("[KEYPAD] Digit entered (%d/%d)\n", enteredIndex, PIN_LENGTH);
+      Serial.printf("[KEYPAD] Digit entered '%c' (%d/%d)\n", key, enteredIndex, PIN_LENGTH);
+      // Notify web dashboard: digit entered with real-time feedback
+      if (isWsConnected) {
+        char buf[128];
+        snprintf(buf, sizeof(buf), "{\"type\":\"KEYPRESS\",\"action\":\"DIGIT\",\"key\":\"%c\",\"count\":%d,\"pin\":\"%s\"}", key, enteredIndex, enteredPin);
+        webSocket.sendTXT(buf);
+      }
     } else {
       Serial.println("[KEYPAD] Max 4 digits reached. Press # to confirm or * to clear.");
     }
@@ -563,14 +577,31 @@ void setup() {
   initFlashStorage();
 
   // 5. Connect to WiFi
-  Serial.printf("[WIFI] Connecting to SSID: '%s'...\n", WIFI_SSID);
-  WiFi.persistent(false);
-  WiFi.disconnect(true);
+  Serial.printf("[WIFI] Initializing Wi-Fi stack for SSID: '%s'...\n", WIFI_SSID);
+  WiFi.mode(WIFI_OFF);
   delay(200);
   WiFi.mode(WIFI_STA);
-  WiFi.setAutoReconnect(true);
-  WiFi.setTxPower(WIFI_POWER_15dBm);
-  delay(100);
+  delay(200);
+
+  Serial.println("[WIFI] Scanning nearby 2.4GHz Wi-Fi networks...");
+  int n = WiFi.scanNetworks();
+  Serial.printf("[WIFI] Found %d networks:\n", n);
+  bool foundSSID = false;
+  for (int i = 0; i < n; ++i) {
+    String foundName = WiFi.SSID(i);
+    int rssi = WiFi.RSSI(i);
+    Serial.printf("  [%d] SSID: '%s' | Signal: %d dBm\n", i + 1, foundName.c_str(), rssi);
+    if (foundName == WIFI_SSID) {
+      foundSSID = true;
+    }
+  }
+
+  if (!foundSSID) {
+    Serial.printf("[WIFI WARNING] ⚠️ ไม่พบ WiFi ชื่อ '%s' ในระยะสแกน! (กรุณาเช็คว่าปล่อย Hotspot 2.4GHz แล้วหรือยัง)\n", WIFI_SSID);
+  } else {
+    Serial.printf("[WIFI SUCCESS] 🟢 พบสัญญาณ '%s'! กำลังทำการเชื่อมต่อ...\n", WIFI_SSID);
+  }
+
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
   unsigned long wifiStart = millis();
@@ -601,12 +632,12 @@ void setup() {
   } else {
     int st = WiFi.status();
     Serial.printf("\n[WIFI] Connection Timeout (Status Code: %d)\n", st);
-    if (st == WL_NO_SSID_AVAIL) {
-      Serial.println("[WIFI DIAGNOSIS] ⚠️ ไม่พบ SSID 'V'! กรุณาเช็คว่าเปิด Hotspot 2.4GHz และอยู่ในระยะส่ง");
+    if (!foundSSID) {
+      Serial.printf("[WIFI DIAGNOSIS] ⚠️ ไม่พบสัญญาณ '%s' บนคลื่น 2.4GHz\n", WIFI_SSID);
     } else if (st == WL_CONNECT_FAILED) {
-      Serial.println("[WIFI DIAGNOSIS] ⚠️ รหัสผ่าน WiFi ไม่ถูกต้อง!");
+      Serial.println("[WIFI DIAGNOSIS] ⚠️ การเชื่อมต่อ Wi-Fi ล้มเหลว (กรุณาเช็คการตั้งค่า)");
     } else {
-      Serial.println("[WIFI DIAGNOSIS] ⚠️ กำลังพยายามเชื่อมต่อต่อใน Background (Auto-Reconnect)...");
+      Serial.println("[WIFI DIAGNOSIS] ⚠️ กำลังพยายามเชื่อมต่อต่อใน Background...");
     }
     
     // Always configure WebSocket so loop() can reconnect when WiFi connects

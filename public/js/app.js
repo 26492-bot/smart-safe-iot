@@ -109,7 +109,11 @@ const el = {
   pwdBtnText: document.getElementById('pwdBtnText'),
   logsTableBody: document.getElementById('logsTableBody'),
   toastContainer: document.getElementById('toastContainer'),
-  filterButtons: document.querySelectorAll('.filter-btn')
+  filterButtons: document.querySelectorAll('.filter-btn'),
+  keypadLiveDisplay: document.getElementById('keypadLiveDisplay'),
+  pinDotsContainer: document.getElementById('pinDotsContainer'),
+  pinDots: document.querySelectorAll('.pin-dot'),
+  keypadDisplayStatus: document.getElementById('keypadDisplayStatus')
 };
 
 // Format Timestamp Helper (DD/MM/YYYY HH:mm:ss)
@@ -264,6 +268,82 @@ function handleSocketMessage(msg) {
         showToast(msg.payload.title, msg.payload.message, msg.payload.variant || 'info');
       }
       break;
+
+    case 'KEYPRESS':
+      handleKeypadLiveDisplay(msg.payload);
+      break;
+  }
+}
+
+// Handle Real-time Keypad Display on Web
+let keypadClearTimer = null;
+function handleKeypadLiveDisplay(payload) {
+  if (!el.keypadLiveDisplay || !el.pinDotsContainer) return;
+
+  const action = payload.action;
+  const count = payload.count || 0;
+  const key = payload.key || '';
+  const pin = payload.pin || '';
+
+  if (keypadClearTimer) clearTimeout(keypadClearTimer);
+
+  if (action === 'CLEAR') {
+    if (el.keypadDisplayStatus) {
+      el.keypadDisplayStatus.textContent = 'ล้างข้อมูล (*)';
+      el.keypadDisplayStatus.className = 'keypad-display-status clear';
+    }
+    el.pinDotsContainer.innerHTML = '<span class="pin-dot-placeholder">กดปุ่มที่ Keypad</span>';
+    keypadClearTimer = setTimeout(() => {
+      if (el.keypadDisplayStatus) {
+        el.keypadDisplayStatus.textContent = 'รอรับข้อมูล...';
+        el.keypadDisplayStatus.className = 'keypad-display-status';
+      }
+    }, 2000);
+  } else if (action === 'CONFIRM') {
+    if (el.keypadDisplayStatus) {
+      el.keypadDisplayStatus.textContent = 'กำลังตรวจสอบรหัส (#)...';
+      el.keypadDisplayStatus.className = 'keypad-display-status checking';
+    }
+    keypadClearTimer = setTimeout(() => {
+      if (el.keypadDisplayStatus) {
+        el.keypadDisplayStatus.textContent = 'รอรับข้อมูล...';
+        el.keypadDisplayStatus.className = 'keypad-display-status';
+      }
+      el.pinDotsContainer.innerHTML = '<span class="pin-dot-placeholder">กดปุ่มที่ Keypad</span>';
+    }, 3000);
+  } else if (action === 'DIGIT') {
+    if (el.keypadDisplayStatus) {
+      el.keypadDisplayStatus.textContent = `กดเลข '${key}' (${count}/4)`;
+      el.keypadDisplayStatus.className = 'keypad-display-status active';
+    }
+
+    // Render numbers pressed visually in clean digit boxes
+    let html = '';
+    for (let i = 0; i < 4; i++) {
+      if (i < pin.length) {
+        const char = pin[i];
+        html += `<div class="pin-digit-box filled bounce-in">${char}</div>`;
+      } else {
+        html += `<div class="pin-digit-box empty"></div>`;
+      }
+    }
+    el.pinDotsContainer.innerHTML = html;
+
+    // Play click sound if enabled
+    try {
+      if (typeof AudioFX !== 'undefined' && AudioFX.playClick) {
+        AudioFX.playClick();
+      }
+    } catch(e) {}
+
+    // Auto reset after 8 seconds of inactivity
+    keypadClearTimer = setTimeout(() => {
+      if (el.keypadDisplayStatus) {
+        el.keypadDisplayStatus.textContent = 'รอรับข้อมูล...';
+        el.keypadDisplayStatus.className = 'keypad-display-status';
+      }
+      el.pinDotsContainer.innerHTML = '<span class="pin-dot-placeholder">กดปุ่มที่ Keypad</span>';
+    }, 8000);
   }
 }
 

@@ -20,8 +20,8 @@
 // 2. WIFI CONFIGURATION
 // ================================================================
 // FIX: ใช้ #define แทน const char* เพื่อป้องกัน multiple definition error
-#define WIFI_SSID     "V"           // Your 2.4GHz WiFi SSID
-#define WIFI_PASSWORD "11111111"    // Your WiFi Password
+#define WIFI_SSID     "TNW-WIFI2"   // Your 2.4GHz WiFi SSID
+#define WIFI_PASSWORD ""            // Your WiFi Password (empty for open network)
 
 // ================================================================
 // 3. IOT BACKEND SERVER CONFIGURATION
