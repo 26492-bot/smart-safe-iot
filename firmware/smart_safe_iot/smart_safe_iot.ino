@@ -125,6 +125,9 @@ void ht16k33_init() {
 }
 
 void setLedMatrix(bool turnOn) {
+  // Turn ON/OFF onboard status LED (GPIO 2) as well for visual lighting feedback
+  digitalWrite(PIN_LED_ONBOARD, turnOn ? HIGH : LOW);
+
   // CRITICAL: Ensure all keypad rows are INPUT (High-Z) before I2C transmission
   // so that any pressed key on col 21 or 22 cannot pull SDA or SCL to GND!
   for (int r = 0; r < KEYPAD_ROWS; r++) {
@@ -247,10 +250,8 @@ void startUnlockSequence(const char* source) {
   currentCycleCount = 0;
   cyclePhaseActive = true;
 
-  // Correct PIN: Buzzer does NOT sound (รหัสถูก -> ไม่ต้องร้อง)
-  buzzerAlarmOff();
-
-  // Phase 1 ON: LED Matrix 1s ON
+  // Correct PIN: Play pleasant unlock chime sound (1760 Hz) + Light ON
+  tone(PIN_BUZZER, 1760);
   setLedMatrix(true);
 }
 
@@ -274,12 +275,13 @@ void updateSafeStateMachine() {
       break;
 
     case STATE_UNLOCKING:
-      // Correct PIN: LED Matrix 1s ON, 1s OFF for 2 cycles (Total 4s)
+      // Correct PIN: LED Matrix + Unlock Chime (1s ON, 1s OFF for 2 cycles)
       if (cyclePhaseActive) {
         if (now - lastCycleToggle >= 1000) {
           cyclePhaseActive = false;
           lastCycleToggle = now;
-          setLedMatrix(false); // Turn OFF
+          setLedMatrix(false); // Turn OFF light
+          buzzerAlarmOff();    // Turn OFF sound
         }
       } else {
         if (now - lastCycleToggle >= 1000) {
@@ -291,10 +293,11 @@ void updateSafeStateMachine() {
             currentState = STATE_IDLE;
             Serial.println("[SAFE] Unlock sequence completed. Ready.");
           } else {
-            // Start next cycle: Turn ON
+            // Start next cycle: Turn ON light + higher pitch chime (2637 Hz)
             cyclePhaseActive = true;
             lastCycleToggle = now;
             setLedMatrix(true);
+            tone(PIN_BUZZER, 2637);
           }
         }
       }
@@ -487,6 +490,11 @@ void handleKeypadInput() {
   char key = getPressedKey();
   if (!key) return;
 
+  // Sound feedback for keypress (40ms beep at 2000Hz)
+  tone(PIN_BUZZER, 2000);
+  delay(40);
+  buzzerAlarmOff();
+
   // 1. Clear / Cancel Key: '*'
   if (key == '*') {
     enteredIndex = 0;
@@ -563,9 +571,11 @@ void setup() {
   Serial.println("   🛡️  SMART SAFE IoT - KIDBRIGHT32 READY");
   Serial.println("==================================================");
 
-  // 1. Initialize Buzzer Pin
+  // 1. Initialize Buzzer & LED Pins
   pinMode(PIN_BUZZER, OUTPUT);
+  pinMode(PIN_LED_ONBOARD, OUTPUT);
   buzzerAlarmOff();
+  digitalWrite(PIN_LED_ONBOARD, LOW);
 
   // 2. Initialize Keypad Pins (Rows as High-Z, Cols as INPUT_PULLUP)
   initKeypadPins();

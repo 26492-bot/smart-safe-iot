@@ -185,6 +185,11 @@ wss.on('connection', (ws, req) => {
     }
   });
 
+  ws.isAlive = true;
+  ws.on('pong', () => {
+    ws.isAlive = true;
+  });
+
   // Client disconnect
   ws.on('close', () => {
     if (clientRole === 'device') {
@@ -205,14 +210,29 @@ wss.on('connection', (ws, req) => {
   });
 });
 
-// Periodic Ping to prevent Cloud proxies (Render, Cloudflare, etc.) from closing idle connections
+// Active Dead Connection Cleaner (every 8 seconds)
+// Immediately detects when ESP32 powers off or USB cable is unplugged
 setInterval(() => {
   wss.clients.forEach((ws) => {
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.ping();
+    if (ws.isAlive === false) {
+      console.log('[WS] Terminating unresponsive/dead socket connection...');
+      const hadDevice = deviceClients.has(ws);
+      deviceClients.delete(ws);
+      browserClients.delete(ws);
+      
+      if (hadDevice) {
+        broadcastToBrowsers({
+          type: 'DEVICE_STATUS',
+          payload: { isDeviceOnline: deviceClients.size > 0, deviceCount: deviceClients.size }
+        });
+      }
+      return ws.terminate();
     }
+
+    ws.isAlive = false;
+    ws.ping();
   });
-}, 25000);
+}, 8000);
 
 // ==========================================
 // REST API ROUTES
