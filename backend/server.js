@@ -246,8 +246,9 @@ wss.on('connection', (ws, req) => {
   });
 });
 
-// Active Dead Connection Cleaner (every 8 seconds)
-// Immediately detects when ESP32 powers off or USB cable is unplugged
+// Active Dead Connection Cleaner (every 3 seconds)
+// Detects when ESP32 powers off or USB cable is unplugged - worst case is
+// two missed pings, so ~6s max instead of the previous ~16s
 setInterval(() => {
   wss.clients.forEach((ws) => {
     if (ws.isAlive === false) {
@@ -268,7 +269,7 @@ setInterval(() => {
     ws.isAlive = false;
     ws.ping();
   });
-}, 8000);
+}, 3000);
 
 // ==========================================
 // REST API ROUTES
