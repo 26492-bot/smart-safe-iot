@@ -193,17 +193,29 @@ char getPressedKey() {
   static char lastKey = 0;
   static unsigned long lastDebounceTime = 0;
   static bool isWaitingRelease = false;
+  static char candidateKey = 0;
+  static unsigned long candidateSince = 0;
 
   char rawKey = scanKeypadRaw();
 
   if (rawKey != 0) {
-    if (!isWaitingRelease && (millis() - lastDebounceTime > 60)) {
+    // Require the same key to be read on a separate follow-up scan before
+    // accepting it, so a single momentary noise glitch on a row/column line
+    // (e.g. shared I2C pins 21/22) can't register as a phantom keypress.
+    if (rawKey != candidateKey) {
+      candidateKey = rawKey;
+      candidateSince = millis();
+      return 0;
+    }
+
+    if (!isWaitingRelease && (millis() - candidateSince >= 20) && (millis() - lastDebounceTime > 60)) {
       isWaitingRelease = true;
       lastKey = rawKey;
       lastDebounceTime = millis();
       return rawKey;
     }
   } else {
+    candidateKey = 0;
     if (isWaitingRelease && (millis() - lastDebounceTime > 60)) {
       isWaitingRelease = false;
       lastDebounceTime = millis();
@@ -275,7 +287,7 @@ void updateSafeStateMachine() {
       break;
 
     case STATE_UNLOCKING:
-      // Correct PIN: LED Matrix + Unlock Chime (1s ON, 1s OFF for 2 cycles)
+      // Correct PIN: LED Matrix flashes twice, Buzzer sounds ONLY on first flash
       if (cyclePhaseActive) {
         if (now - lastCycleToggle >= 1000) {
           cyclePhaseActive = false;
@@ -293,11 +305,11 @@ void updateSafeStateMachine() {
             currentState = STATE_IDLE;
             Serial.println("[SAFE] Unlock sequence completed. Ready.");
           } else {
-            // Start next cycle: Turn ON light + higher pitch chime (2637 Hz)
+            // Start next cycle: Turn ON light ONLY (No buzzer)
             cyclePhaseActive = true;
             lastCycleToggle = now;
             setLedMatrix(true);
-            tone(PIN_BUZZER, 2637);
+            // buzzer is omitted here to make it sound only once!
           }
         }
       }
@@ -490,10 +502,8 @@ void handleKeypadInput() {
   char key = getPressedKey();
   if (!key) return;
 
-  // Sound feedback for keypress (40ms beep at 2000Hz)
-  tone(PIN_BUZZER, 2000);
-  delay(40);
-  buzzerAlarmOff();
+  // No sound while entering digits - buzzer stays silent until '#' is
+  // pressed, then startUnlockSequence()/startAlarmSequence() handle sound+light.
 
   // 1. Clear / Cancel Key: '*'
   if (key == '*') {
@@ -587,30 +597,13 @@ void setup() {
   initFlashStorage();
 
   // 5. Connect to WiFi
+  // FIX: ลบ WiFi.mode(WIFI_OFF) ออก เพราะมันทำให้ TG1WDT_SYS_RESET บน Core 3.x + KidBright V1.3
   Serial.printf("[WIFI] Initializing Wi-Fi stack for SSID: '%s'...\n", WIFI_SSID);
-  WiFi.mode(WIFI_OFF);
-  delay(200);
   WiFi.mode(WIFI_STA);
-  delay(200);
+  delay(500); // เพิ่ม delay เพื่อให้ WiFi stack พร้อมก่อน
 
-  Serial.println("[WIFI] Scanning nearby 2.4GHz Wi-Fi networks...");
-  int n = WiFi.scanNetworks();
-  Serial.printf("[WIFI] Found %d networks:\n", n);
   bool foundSSID = false;
-  for (int i = 0; i < n; ++i) {
-    String foundName = WiFi.SSID(i);
-    int rssi = WiFi.RSSI(i);
-    Serial.printf("  [%d] SSID: '%s' | Signal: %d dBm\n", i + 1, foundName.c_str(), rssi);
-    if (foundName == WIFI_SSID) {
-      foundSSID = true;
-    }
-  }
-
-  if (!foundSSID) {
-    Serial.printf("[WIFI WARNING] ⚠️ ไม่พบ WiFi ชื่อ '%s' ในระยะสแกน! (กรุณาเช็คว่าปล่อย Hotspot 2.4GHz แล้วหรือยัง)\n", WIFI_SSID);
-  } else {
-    Serial.printf("[WIFI SUCCESS] 🟢 พบสัญญาณ '%s'! กำลังทำการเชื่อมต่อ...\n", WIFI_SSID);
-  }
+  Serial.println("[WIFI] Connecting...");
 
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
@@ -667,14 +660,22 @@ void setup() {
 // ================================================================
 
 void loop() {
-  // 1. Maintain WebSocket connection if WiFi connected
+  // 1. Maintain WiFi and WebSocket connection
   if (WiFi.status() == WL_CONNECTED) {
     webSocket.loop();
 
-    // Heartbeat ping
+    // Heartbeat ping to server
     if (isWsConnected && (millis() - lastHeartbeatTime >= HEARTBEAT_INTERVAL)) {
       lastHeartbeatTime = millis();
       webSocket.sendTXT("{\"type\":\"PING\"}");
+    }
+  } else {
+    // If WiFi is disconnected, attempt auto-reconnect every 5 seconds
+    static unsigned long lastWifiRetry = 0;
+    if (millis() - lastWifiRetry >= 5000) {
+      lastWifiRetry = millis();
+      Serial.printf("[WIFI] Retrying Wi-Fi connection to '%s'...\n", WIFI_SSID);
+      WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
     }
   }
 
