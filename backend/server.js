@@ -87,6 +87,18 @@ wss.on('connection', (ws, req) => {
       clearTimeout(pendingDeviceAuthTimeout);
       pendingDeviceAuthTimeout = null;
     }
+
+    // Only one physical safe exists - if an older device socket is still
+    // registered (e.g. a stale session left over from a WiFi drop that never
+    // closed cleanly), kick it out so the device count can never accumulate
+    // ghost entries and "ESP32 ONLINE" always reflects the latest connection.
+    for (const existing of Array.from(deviceClients)) {
+      if (existing !== ws) {
+        deviceClients.delete(existing);
+        existing.terminate();
+      }
+    }
+
     browserClients.delete(ws);
     clientRole = 'device';
     deviceClients.add(ws);
