@@ -74,7 +74,10 @@ const unsigned long HEARTBEAT_INTERVAL = 20000; // 20 seconds
 
 // 4x4 Keypad Matrix Mapping
 // FIX: ย้าย ROW_PINS / COL_PINS มาไว้ใน .ino เพื่อป้องกัน multiple definition
-const byte ROW_PINS[KEYPAD_ROWS] = { 26, 27, 18, 19 };
+// NOTE: Row1/Row2 wiring is crossed on this unit (physical Pin1<->Pin2), so
+// the pin order here is swapped to compensate - confirmed by pressing '1'
+// showing as '4' and vice versa before this fix.
+const byte ROW_PINS[KEYPAD_ROWS] = { 27, 26, 18, 19 };
 const byte COL_PINS[KEYPAD_COLS] = { 33, 23, 21, 22 };
 
 const char KEY_MAP[KEYPAD_ROWS][KEYPAD_COLS] = {
@@ -134,6 +137,13 @@ void setLedMatrix(bool turnOn) {
     pinMode(ROW_PINS[r], INPUT);
   }
 
+  // Hand GPIO21/22 back to the I2C peripheral for the transmission, then
+  // return them to keypad column (INPUT_PULLUP) mode right after - avoids
+  // the two roles (I2C bus vs. keypad column read) fighting over the pins.
+  pinMode(PIN_I2C_SDA, INPUT);
+  pinMode(PIN_I2C_SCL, INPUT);
+  Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
+
   Wire.beginTransmission(LED_ADDRESS);
   Wire.write(0x00); // Start at display RAM address 0x00
   uint8_t fillByte = turnOn ? 0xFF : 0x00;
@@ -141,6 +151,9 @@ void setLedMatrix(bool turnOn) {
     Wire.write(fillByte);
   }
   Wire.endTransmission();
+
+  pinMode(PIN_I2C_SDA, INPUT_PULLUP);
+  pinMode(PIN_I2C_SCL, INPUT_PULLUP);
 }
 
 // ================================================================
@@ -160,70 +173,14 @@ void initKeypadPins() {
   pinMode(COL_PINS[3], INPUT_PULLUP); // GPIO 22 (SCL, has onboard I2C pullup)
 }
 
-char scanKeypadRaw() {
-  // Guarantee all rows are High-Z initially
-  for (int r = 0; r < KEYPAD_ROWS; r++) {
-    pinMode(ROW_PINS[r], INPUT);
-  }
-
-  for (int r = 0; r < KEYPAD_ROWS; r++) {
-    // Activate only this row by setting it OUTPUT LOW
-    pinMode(ROW_PINS[r], OUTPUT);
-    digitalWrite(ROW_PINS[r], LOW);
-    delayMicroseconds(25); // Brief settling time
-
-    for (int c = 0; c < KEYPAD_COLS; c++) {
-      if (digitalRead(COL_PINS[c]) == LOW) {
-        char key = KEY_MAP[r][c];
-        // IMMEDIATELY restore row back to High-Z INPUT before returning!
-        pinMode(ROW_PINS[r], INPUT);
-        return key;
-      }
-    }
-
-    // Restore row back to High-Z INPUT before scanning next row
-    pinMode(ROW_PINS[r], INPUT);
-    delayMicroseconds(5);
-  }
-
-  return 0; // No key pressed
-}
-
-char getPressedKey() {
-  static char lastKey = 0;
-  static unsigned long lastDebounceTime = 0;
-  static bool isWaitingRelease = false;
-  static char candidateKey = 0;
-  static unsigned long candidateSince = 0;
-
-  char rawKey = scanKeypadRaw();
-
-  if (rawKey != 0) {
-    // Require the same key to be read on a separate follow-up scan before
-    // accepting it, so a single momentary noise glitch on a row/column line
-    // (e.g. shared I2C pins 21/22) can't register as a phantom keypress.
-    if (rawKey != candidateKey) {
-      candidateKey = rawKey;
-      candidateSince = millis();
-      return 0;
-    }
-
-    if (!isWaitingRelease && (millis() - candidateSince >= 20) && (millis() - lastDebounceTime > 60)) {
-      isWaitingRelease = true;
-      lastKey = rawKey;
-      lastDebounceTime = millis();
-      return rawKey;
-    }
-  } else {
-    candidateKey = 0;
-    if (isWaitingRelease && (millis() - lastDebounceTime > 60)) {
-      isWaitingRelease = false;
-      lastDebounceTime = millis();
-    }
-  }
-
-  return 0;
-}
+// Debounce approach validated on this unit's hardware: confirm a press with
+// one re-check after a short settle delay, then block until the key is
+// fully released before scanning continues. A stricter "match on every
+// consecutive scan" debounce was tried first but this keypad's ribbon has
+// enough contact bounce that it often needed two physical presses to
+// register once - re-checking a single time after 30ms is forgiving of
+// that bounce while still rejecting momentary noise glitches (which don't
+// still read LOW 30ms later).
 
 // ================================================================
 // FLASH MEMORY (NVS) MANAGEMENT
@@ -498,10 +455,7 @@ void webSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
 // KEYPAD SCANNING & INPUT PROCESSING
 // ================================================================
 
-void handleKeypadInput() {
-  char key = getPressedKey();
-  if (!key) return;
-
+void processKeyPress(char key) {
   // No sound while entering digits - buzzer stays silent until '#' is
   // pressed, then startUnlockSequence()/startAlarmSequence() handle sound+light.
 
@@ -566,6 +520,38 @@ void handleKeypadInput() {
   }
 }
 
+void handleKeypadInput() {
+  for (int r = 0; r < KEYPAD_ROWS; r++) {
+    // Activate only this row by setting it OUTPUT LOW; all others stay High-Z
+    pinMode(ROW_PINS[r], OUTPUT);
+    digitalWrite(ROW_PINS[r], LOW);
+    delayMicroseconds(25); // Brief settling time
+
+    for (int c = 0; c < KEYPAD_COLS; c++) {
+      if (digitalRead(COL_PINS[c]) == LOW) {
+        // Confirm the press is real (not a momentary noise glitch on the
+        // shared I2C pins 21/22) by re-checking after a short settle delay.
+        delay(30);
+        if (digitalRead(COL_PINS[c]) == LOW) {
+          char key = KEY_MAP[r][c];
+          processKeyPress(key);
+
+          // Block until the key is fully released so one physical press
+          // can't be read as multiple keystrokes.
+          while (digitalRead(COL_PINS[c]) == LOW) {
+            delay(10);
+          }
+          delay(50); // Extra settle time after release
+        }
+      }
+    }
+
+    // Restore row back to High-Z INPUT before scanning next row
+    pinMode(ROW_PINS[r], INPUT);
+    delayMicroseconds(5);
+  }
+}
+
 // ================================================================
 // SETUP
 // ================================================================
@@ -601,6 +587,16 @@ void setup() {
   Serial.printf("[WIFI] Initializing Wi-Fi stack for SSID: '%s'...\n", WIFI_SSID);
   WiFi.mode(WIFI_STA);
   delay(500); // เพิ่ม delay เพื่อให้ WiFi stack พร้อมก่อน
+
+  // The board already needed the brownout detector disabled because WiFi
+  // current draw sags the supply enough to reset it - that same current
+  // spike (especially at full TX power, and on every modem-sleep wake) is
+  // the likely reason the keypad reads garbage exactly when WiFi is active
+  // but was clean in the no-WiFi standalone test. Lowering TX power and
+  // disabling modem sleep reduce those current spikes; a proper 5V/1A+
+  // power source (not a laptop USB port) is still the real fix.
+  WiFi.setTxPower(WIFI_POWER_8_5dBm);
+  WiFi.setSleep(false);
 
   bool foundSSID = false;
   Serial.println("[WIFI] Connecting...");
