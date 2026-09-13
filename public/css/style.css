@@ -217,6 +217,12 @@ body {
   border-color: rgba(245, 158, 11, 0.3);
 }
 
+.device-status-badge.connecting {
+  background: rgba(148, 163, 184, 0.12);
+  color: #94a3b8;
+  border-color: rgba(148, 163, 184, 0.3);
+}
+
 .status-pulse {
   width: 8px;
   height: 8px;
