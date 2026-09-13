@@ -80,17 +80,39 @@ wss.on('connection', (ws, req) => {
   const secretParam = urlParams.get('secret');
 
   let clientRole = 'browser';
+  let pendingDeviceAuthTimeout = null;
 
-  if (roleParam === 'device') {
+  function authenticateAsDevice() {
+    if (pendingDeviceAuthTimeout) {
+      clearTimeout(pendingDeviceAuthTimeout);
+      pendingDeviceAuthTimeout = null;
+    }
+    browserClients.delete(ws);
     clientRole = 'device';
     deviceClients.add(ws);
-    console.log(`[WS] ESP32 Device connected (${req.socket.remoteAddress}). Total devices: ${deviceClients.size}`);
-    
+    console.log(`[WS] ESP32 Device authenticated (${req.socket.remoteAddress}). Total devices: ${deviceClients.size}`);
+
     // Broadcast device status to web clients
     broadcastToBrowsers({
       type: 'DEVICE_STATUS',
       payload: { isDeviceOnline: true, deviceCount: deviceClients.size }
     });
+  }
+
+  if (roleParam === 'device') {
+    if (secretParam === DEVICE_SECRET) {
+      // Secret was already provided in the connection URL
+      authenticateAsDevice();
+    } else {
+      // Do NOT count this as an online device yet - wait for a valid IDENTIFY
+      // message carrying the correct secret. Without this check, anyone could
+      // open /ws?role=device and falsely show "ESP32 ONLINE" on the dashboard.
+      console.log(`[WS] Device connection pending authentication (${req.socket.remoteAddress})`);
+      pendingDeviceAuthTimeout = setTimeout(() => {
+        console.log('[WS] Device did not authenticate in time. Closing connection.');
+        ws.close(4001, 'Authentication timeout');
+      }, 5000);
+    }
   } else {
     browserClients.add(ws);
     console.log(`[WS] Web Browser connected. Total browsers: ${browserClients.size}`);
@@ -115,14 +137,12 @@ wss.on('connection', (ws, req) => {
       // Device identification from payload
       if (msg.type === 'IDENTIFY') {
         if (msg.role === 'device') {
-          browserClients.delete(ws);
-          deviceClients.add(ws);
-          clientRole = 'device';
-          console.log('[WS] Client identified as ESP32 Device');
-          broadcastToBrowsers({
-            type: 'DEVICE_STATUS',
-            payload: { isDeviceOnline: true, deviceCount: deviceClients.size }
-          });
+          if (msg.secret !== DEVICE_SECRET) {
+            console.log('[WS] Rejected IDENTIFY: invalid device secret');
+            ws.close(4001, 'Invalid device secret');
+            return;
+          }
+          authenticateAsDevice();
         }
         return;
       }
@@ -192,6 +212,10 @@ wss.on('connection', (ws, req) => {
 
   // Client disconnect
   ws.on('close', () => {
+    if (pendingDeviceAuthTimeout) {
+      clearTimeout(pendingDeviceAuthTimeout);
+      pendingDeviceAuthTimeout = null;
+    }
     if (clientRole === 'device') {
       deviceClients.delete(ws);
       console.log(`[WS] ESP32 Device disconnected. Remaining devices: ${deviceClients.size}`);
