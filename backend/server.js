@@ -390,11 +390,18 @@ app.post('/api/safe/unlock', (req, res) => {
       timestamp: new Date().toISOString()
     });
 
-    // Record audit log
-    const logDetails = isDeviceDelivered
-      ? 'สั่งเปิดจากเว็บไซต์ (ส่งคำสั่งถึง ESP32 สำเร็จ)'
-      : 'สั่งเปิดจากเว็บไซต์ (ESP32 ออฟไลน์ - จำลองการปลดล็อก)';
-    
+    // If the device never received the command, nothing actually happened
+    // at the safe - don't log a fake SUCCESS entry or tell the browser the
+    // unlock worked.
+    if (!isDeviceDelivered) {
+      return res.json({
+        success: false,
+        message: 'ส่งคำสั่งไม่สำเร็จ: ESP32 ออฟไลน์อยู่ ตู้เซฟไม่ได้ถูกปลดล็อกจริง',
+        isDeviceOnline: false
+      });
+    }
+
+    const logDetails = 'สั่งเปิดจากเว็บไซต์ (ส่งคำสั่งถึง ESP32 สำเร็จ)';
     db.addLog('WEBSITE', 'SUCCESS', logDetails);
 
     // Broadcast to web dashboards
@@ -411,8 +418,8 @@ app.post('/api/safe/unlock', (req, res) => {
 
     res.json({
       success: true,
-      message: isDeviceDelivered ? 'ส่งคำสั่งเปิดตู้เซฟไปยัง ESP32 สำเร็จ' : 'ส่งคำสั่งแล้ว (ESP32 ออฟไลน์)',
-      isDeviceOnline: isDeviceDelivered
+      message: 'ส่งคำสั่งเปิดตู้เซฟไปยัง ESP32 สำเร็จ',
+      isDeviceOnline: true
     });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -468,18 +475,21 @@ app.post('/api/safe/change-password', (req, res) => {
     });
 
     // Notify connected browsers (Never expose actual password in broadcast)
+    const syncMessage = isDeviceDelivered
+      ? 'เปลี่ยนรหัสผ่านตู้เซฟเรียบร้อยแล้ว สามารถใช้รหัสใหม่ที่ Keypad ได้ทันที'
+      : 'เปลี่ยนรหัสผ่านในระบบเรียบร้อยแล้ว แต่ ESP32 ออฟไลน์อยู่ - รหัสใหม่จะมีผลที่ Keypad เมื่อบอร์ดเชื่อมต่อ Cloud อีกครั้ง';
     broadcastToBrowsers({
       type: 'TOAST',
       payload: {
         title: 'รหัสผ่านเปลี่ยนสำเร็จ',
-        message: 'เปลี่ยนรหัสผ่านตู้เซฟเรียบร้อยแล้ว สามารถใช้รหัสใหม่ที่ Keypad ได้ทันที',
-        variant: 'success'
+        message: syncMessage,
+        variant: isDeviceDelivered ? 'success' : 'info'
       }
     });
 
     res.json({
       success: true,
-      message: 'เปลี่ยนรหัสผ่านสำเร็จเรียบร้อยแล้ว',
+      message: syncMessage,
       isDeviceOnline: isDeviceDelivered
     });
   } catch (err) {
